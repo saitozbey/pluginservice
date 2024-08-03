@@ -1,0 +1,68 @@
+Yetki Operasyonları
+	Hesaba Yetki Ekleme Servisi
+		Sadece başarılı işlem olduğunda Audit tutuyor, hatalı isteklerin de Audit'inin tutulması gerekiyor.
+		Yanlış bir security group ismi girdiğimde beklendiği gibi yetki bulunamadığı için eklenmiyor, ancak başarılı response'u döndürüp başarılı Audit'i oluşturuyor.
+	Hesaba Yetki Ekleme Servisi
+		Yukarıdakilerin aynısı geçerli.
+	
+AD Grup Ekleme Silme
+	Grup Oluşturma Servisi
+		Varolan bir grubu eklemeye çalıştığında servis hata alıyor ama başarılı eklendi Audit'i oluşturuyor.
+	Grup Silme Servisi
+		Varolan bir grubu eklemeye çalıştığında servis hata alıyor ama başarılı eklendi Audit'i oluşturuyor.
+		Eklerken "Security Request" action adıyla bir Audit tutuluyor, silme işlemlerinde "null Request" action adıyla gözüküyor.
+		
+CyberArk Servisleri
+	Hesap Oluşturma
+		/launch ucunu tetiklediğimde hata alıyor. 
+		Hata logu:
+			- ---> launch({name=3064, ticketId=#123456})
+            - java.lang.NullPointerException
+		Sebebi:
+			this.logger.debug("---> launch(" + var1 + ")");
+			this.context = SailPointFactory.getCurrentContext();
+			this.createAudit(var1);
+			
+			fonksiyon çağrıldığı anda Audit tutulmaya çalışılmış, bunun fonksiyonun en altına işlemlerin sonucuna göre alınması gerekmektedir.
+			
+Servis Hesapları
+	Hesap Oluşturma
+		/createService ucu hata almakta.
+		Hata logu:
+			---> createService(): {requester=3064, firstname=serviceGivenNamest, displayName=Test Service st, ticketId=#332332, lastname=serviceSNst}		
+            requester: 3064
+            description: Test Service st
+            firstname: serviceGivenNamest
+            lastname: serviceSNst
+            ticketId: #332332
+            application: sailpoint.object.Application@29712906[id=0ab4217c8e321166818e4203e56c19ab,name=Active Directory - Service Accounts]
+            links : []
+            application1: sailpoint.object.Application@29712906[id=0ab4217c8e321166818e4203e56c19ab,name=Active Directory - Service Accounts]
+            links : []
+            link :null
+            java.lang.NullPointerException
+		Sebebi:
+			Active Directory - Service Accounts'a ait bir link bulunamadığı için null hatası alıyor, neden böyle bir link aranıyor?
+			
+			Ayrıca bu hata geçildiğinde muhtemelen aşağıdaki gibi bir hatalı işlem olacak:
+			
+			String var6 = (String)var0.get("ticketId");
+			if (StringUtils.isNotEmpty(var6)) {
+				var6 = var6.trim();
+			}
+			logger.debug("ticketId: " + var6);
+			
+			var18.add(new ProvisioningPlan.AttributeRequest("employeeID", Operation.Set, var6));
+			
+			ticketId olarak alınan değer AD'deki employeeID alanına beslenmeye çalışılmış.
+			
+			
+		Düzeltme:
+			employeeID şemada bulunmuyor, bu alan neden bu değerle beslenmeye çalışılıyor. 
+			Ayrıca kişinin hiçbir servis hesabı yoksa bu hatayı alıyor. Eğer varsa hesabı oluşturuyor. Hesap oluşturulduğunda response'da servis hesabının şifresi de gözüküyor, bu kaldırılmalı.
+			Oluşturulan audit'in action alanında ticketId'si yazıyor, audit içerisinde oluşturulan hesabım sAMAccountName'i yazmıyor. Bunlar da düzeltilmeli.
+			
+			
+	Hesap Disable Etme
+		Dokümanda /remove olarka işlem yapılacağı yazılmış ancak bu ucu bulamıyor. Kaynak kodu kontrol ettiğimizde ise /disableService şeklinde kullanılmış.
+		Kapatılan hesabın description alanına da "#332332 talebine istinaden oluşturulmuştur." yazılıyor. Bunu kapatılmıştır olarak düzenleyebiliriz.
