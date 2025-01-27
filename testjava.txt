@@ -1,0 +1,1690 @@
+//
+// Source code recreated from a .class file by IntelliJ IDEA
+// (powered by FernFlower decompiler)
+//
+
+package com.ihsteknoloji.consultantOperations.helper;
+
+import com.google.gson.Gson;
+import com.ihsteknoloji.consultantOperations.utils.TaskNames;
+import ihs.lib.util.CapitalizationStyle;
+import ihs.lib.util.NameChoosingPolicy;
+import ihs.lib.util.UserNameStyle;
+import ihs.lib.util.UserNameUtil;
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.io.OutputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
+import javax.ws.rs.core.Response;
+import javax.ws.rs.core.Response.Status;
+import org.apache.commons.collections.CollectionUtils;
+import org.apache.commons.lang.StringUtils;
+import org.apache.log4j.Logger;
+import org.json.JSONArray;
+import org.json.JSONObject;
+import sailpoint.api.IdentityService;
+import sailpoint.api.Provisioner;
+import sailpoint.api.SailPointContext;
+import sailpoint.api.SailPointFactory;
+import sailpoint.object.Application;
+import sailpoint.object.Attributes;
+import sailpoint.object.AuditEvent;
+import sailpoint.object.EmailOptions;
+import sailpoint.object.EmailTemplate;
+import sailpoint.object.Filter;
+import sailpoint.object.Identity;
+import sailpoint.object.IdentityEntitlement;
+import sailpoint.object.Link;
+import sailpoint.object.ManagedAttribute;
+import sailpoint.object.ProvisioningPlan;
+import sailpoint.object.ProvisioningProject;
+import sailpoint.object.ProvisioningResult;
+import sailpoint.object.QueryOptions;
+import sailpoint.object.SailPointObject;
+import sailpoint.object.Source;
+import sailpoint.object.Filter.MatchMode;
+import sailpoint.object.ProvisioningPlan.ObjectOperation;
+import sailpoint.object.ProvisioningPlan.AccountRequest.Operation;
+import sailpoint.tools.GeneralException;
+
+public class ResourceHelper {
+    private static final Logger logger = Logger.getLogger(ResourceHelper.class);
+    private static SailPointContext context;
+    private static final String TECHNICIAN_KEY = "TECH_KEY_XXXX";
+    private static final String BASE_URL = "https://burganteknoloji.ebt.bank:8080/api/v3/requests/";
+
+    public ResourceHelper() {
+    }
+
+    public static void notify(String var0, List<String> var1, List<String> var2, List<String> var3, Map<String, Object> var4) throws GeneralException {
+        SailPointContext var5 = SailPointFactory.getCurrentContext();
+        EmailTemplate var6 = (EmailTemplate)var5.getObjectByName(EmailTemplate.class, var0);
+        if (null == var6) {
+            logger.error("Could not find email template [ " + var0 + " ]");
+        } else {
+            var6 = (EmailTemplate)var6.deepCopy(var5);
+            if (null == var6) {
+                logger.error("Failed to deepCopy template [ " + var0 + " ]");
+            } else if (CollectionUtils.isEmpty(var1)) {
+                logger.error("Email Addresses list is NULL or EMPTY!");
+            } else {
+                if (!CollectionUtils.isEmpty(var2)) {
+                    String var7 = StringUtils.join(var2, ",");
+                    var6.setCc(var7);
+                }
+
+                if (!CollectionUtils.isEmpty(var3)) {
+                    String var9 = StringUtils.join(var3, ",");
+                    var6.setBcc(var9);
+                }
+
+                EmailOptions var10 = new EmailOptions(var1, var4);
+                var10.setSendImmediate(false);
+                var5.sendEmailNotification(var6, var10);
+                logger.debug("Email sent to " + var1 + " from template " + var0);
+            }
+        }
+    }
+
+    private static String mapToJson(Map<String, Object> var0) {
+        Gson var1 = new Gson();
+        return var1.toJson(var0);
+    }
+
+    private static boolean checkMemberOf(String var0, String var1) throws GeneralException {
+        IdentityEntitlement var2 = (IdentityEntitlement)context.getUniqueObject(IdentityEntitlement.class, Filter.and(Filter.eq("value", var0), Filter.eq("nativeIdentity", var1)));
+        return null != var2;
+    }
+
+    private static void createAudit(Map<String, Object> var0) throws GeneralException {
+        AuditEvent var1 = new AuditEvent();
+        var1.setAction((String)var0.get("action"));
+        var1.setSource((String)var0.get("source"));
+        var1.setInterface("ManageEngine");
+        var1.setTarget((String)var0.get("user"));
+        var1.setApplication((String)var0.get("application"));
+        Attributes var2 = new Attributes();
+        var2.putAll((Map)var0.get("params"));
+        var1.setAttributes(var2);
+        context.saveObject(var1);
+        context.commitTransaction();
+    }
+
+    private static boolean executePlan(ProvisioningPlan var0) throws GeneralException {
+        context = SailPointFactory.getCurrentContext();
+        Provisioner var1 = new Provisioner(context);
+        var1.setNoLocking(true);
+        var1.setOptimisticProvisioning(true);
+        ProvisioningProject var2 = var1.compile(var0);
+        var1.execute(var2);
+        boolean var3 = false;
+        List var4 = var2.getPlans();
+        if (CollectionUtils.isNotEmpty(var4)) {
+            logger.debug("executedPlans size: " + var4.size());
+
+            for(ProvisioningPlan var6 : var4) {
+                List var7 = var6.getAccountRequests();
+                List var8 = var6.getObjectRequests();
+                if (CollectionUtils.isNotEmpty(var7)) {
+                    logger.debug("accountRequests size: " + var7.size());
+
+                    for(ProvisioningPlan.AccountRequest var14 : var7) {
+                        ProvisioningResult var15 = var14.getResult();
+                        if (null != var15) {
+                            logger.debug("result to XML " + var15.toXml());
+                            String var16 = var15.getStatus();
+                            logger.debug("statusStr: " + var16);
+                            var3 = StringUtils.equalsIgnoreCase(var16, "committed");
+                        }
+                    }
+                } else if (CollectionUtils.isNotEmpty(var8)) {
+                    logger.debug("objectRequest is not empty");
+
+                    for(ProvisioningPlan.ObjectRequest var10 : var8) {
+                        ProvisioningResult var11 = var10.getResult();
+                        if (null != var11) {
+                            logger.debug("result to XML " + var11.toXml());
+                            String var12 = var11.getStatus();
+                            logger.debug("statusStr: " + var12);
+                            var3 = StringUtils.equalsIgnoreCase(var12, "committed");
+                        }
+                    }
+                }
+
+                Logger var10000 = logger;
+                String var10001 = System.lineSeparator();
+                var10000.debug("ExecutedPlan: " + var10001 + var6.toXml() + System.lineSeparator());
+            }
+        }
+
+        return var3;
+    }
+
+    private static boolean createG0Accounts(Identity var0) throws GeneralException {
+        context = SailPointFactory.getCurrentContext();
+        logger.debug("called Create G0 Accounts method");
+        Application var1 = (Application)context.getObjectByName(Application.class, "Active Directory");
+        logger.debug("call create Account for create Account request and execute plan");
+        return createAccount(var0, var1);
+    }
+
+    private static boolean createC9Accounts(Identity var0) throws GeneralException {
+        context = SailPointFactory.getCurrentContext();
+        logger.debug("called Create C9 Accounts method");
+        Application var1 = (Application)context.getObjectByName(Application.class, "Active Directory - Cyberark Accounts");
+        logger.debug("call create Account for create Account request and execute plan");
+        return createAccount(var0, var1);
+    }
+
+    private static String calculateEmployeeNumber() throws GeneralException {
+        QueryOptions var0 = new QueryOptions();
+        var0.add(new Filter[]{Filter.eq("type", "consultant")});
+        List var2 = context.getObjects(Identity.class, var0);
+        ArrayList var3 = new ArrayList();
+        if (CollectionUtils.isEmpty(var2)) {
+            return "G00001";
+        } else {
+            for(String var6 : (List)var2.stream().map(SailPointObject::getName).collect(Collectors.toList())) {
+                try {
+                    var3.add(Integer.parseInt(var6.substring(1)));
+                } catch (NumberFormatException var8) {
+                    logger.debug(var6 + " cannot parse to int.");
+                }
+            }
+
+            int var9 = 0;
+
+            for(int var7 : var3) {
+                if (var7 > var9) {
+                    var9 = var7;
+                }
+            }
+
+            String var1 = String.format("G%05d", var9 + 1);
+            return var1;
+        }
+    }
+
+    private static boolean createAccount(Identity var0, Application var1) throws GeneralException {
+        ProvisioningPlan var2 = new ProvisioningPlan();
+        var2.setTargetIntegration(var1.getName());
+        var2.setNativeIdentity(var0.getName());
+        var2.setIdentity(var0);
+        var2.setSource(Source.WebService);
+        ProvisioningPlan.AccountRequest var3 = new ProvisioningPlan.AccountRequest();
+        var3.setApplication(var1.getName());
+        var3.setOperation(Operation.Create);
+        var2.add(var3);
+        Logger var10000 = logger;
+        String var10001 = System.lineSeparator();
+        var10000.debug("createAccount::plan --> " + var10001 + var2.toXml());
+        return executePlan(var2);
+    }
+
+    private static void createCyberArkAccount(String var0, String var1) throws GeneralException {
+        ProvisioningPlan var2 = new ProvisioningPlan();
+        ProvisioningPlan.AccountRequest var3 = new ProvisioningPlan.AccountRequest();
+        var3.setApplication("Cyberark");
+        var3.setOperation(Operation.Create);
+        Identity var4 = (Identity)context.getObjectByName(Identity.class, var1);
+        Attributes var5 = new Attributes();
+        var5.put("groupType", "external");
+        var5.put("remoteMachines", var0.replaceAll(",", ";"));
+        var2.setArguments(var5);
+        var2.add(var3);
+        var2.setSource(Source.WebService);
+        var2.setSourceName("CyberArk Account Request for: " + var1);
+        var2.setIdentity(var4);
+        logger.debug("createCyberArkAccount plan: " + var2.toXml());
+        executePlan(var2);
+    }
+
+    private static Map<String, String> getTasks(String var0) throws IOException {
+        String var1 = "https://burganteknoloji.ebt.bank:8080/api/v3/requests/" + var0 + "/tasks";
+        URL var2 = new URL(var1);
+        HttpURLConnection var3 = (HttpURLConnection)var2.openConnection();
+        var3.setRequestMethod("GET");
+        var3.setRequestProperty("Content-Type", "application/json");
+        var3.setRequestProperty("technician_key", "TECH_KEY_XXXX");
+        int var5 = var3.getResponseCode();
+        InputStream var4;
+        if (var5 >= 200 && var5 < 300) {
+            var4 = var3.getInputStream();
+        } else {
+            var4 = var3.getErrorStream() != null ? var3.getErrorStream() : var3.getInputStream();
+        }
+
+        BufferedReader var6 = new BufferedReader(new InputStreamReader(var4, StandardCharsets.UTF_8));
+        StringBuilder var8 = new StringBuilder();
+
+        String var7;
+        while((var7 = var6.readLine()) != null) {
+            var8.append(var7).append("\n");
+        }
+
+        var6.close();
+        logger.debug("responseCode: " + var5);
+        logger.debug("responseMessage: " + var3.getResponseMessage());
+        JSONObject var9 = new JSONObject(var8.toString());
+        JSONArray var10 = var9.getJSONArray("tasks");
+        HashMap var11 = new HashMap();
+        logger.debug("tasksArray size: " + var10.length());
+
+        for(int var12 = 0; var12 < var10.length(); ++var12) {
+            logger.debug("for baslangic...");
+            JSONObject var13 = var10.getJSONObject(var12);
+            JSONObject var14 = var13.getJSONObject("template");
+            logger.debug("template: " + var14);
+            String var15 = var14.getString("name");
+            logger.debug("task_name: " + var15);
+            String var16 = var14.getString("id");
+            logger.debug("task_id: " + var16);
+            String var17 = var13.getString("id");
+            logger.debug("taskId" + var17);
+            if (var16.equals("40207")) {
+                var11.put("companyGroupName", var13.getString("description").replace("<div>", "").replace("<br /></div>", ""));
+            }
+
+            var11.put(var16, var17);
+            logger.debug("for bitis..");
+        }
+
+        return var11;
+    }
+
+    private static void setWorkLogToTasks(String var0, String var1) throws IOException {
+        String var2 = "https://burganteknoloji.ebt.bank:8080/api/v3/requests/" + var0 + "/tasks/" + var1 + "/worklogs";
+        logger.debug("fullUrl: " + var2);
+        HashMap var3 = new HashMap();
+        HashMap var4 = new HashMap();
+        HashMap var5 = new HashMap();
+        var5.put("id", "3007");
+        HashMap var6 = new HashMap();
+        var6.put("hours", "1");
+        var6.put("minutes", "0");
+        HashMap var7 = new HashMap();
+        var7.put("id", 1);
+        var4.put("owner", var5);
+        var4.put("time_spent", var6);
+        var4.put("type", var7);
+        var4.put("description", "tasks_subject");
+        var3.put("worklog", var4);
+        String var8 = mapToJson(var3);
+        logger.debug("requestBody: " + var8);
+        String var9 = URLEncoder.encode(var8, StandardCharsets.UTF_8);
+        logger.debug("encodedInputData: " + var9);
+        var2 = var2 + "?input_data=" + var9;
+        logger.debug("modifiedUrlStr: " + var2);
+        URL var10 = new URL(var2);
+        HttpURLConnection var11 = (HttpURLConnection)var10.openConnection();
+        var11.setRequestMethod("POST");
+        var11.setRequestProperty("Content-Type", "application/json");
+        var11.setRequestProperty("technician_key", "TECH_KEY_XXXX");
+        var11.setDoOutput(true);
+        var11.connect();
+        int var13 = var11.getResponseCode();
+        InputStream var12;
+        if (var13 >= 200 && var13 < 300) {
+            var12 = var11.getInputStream();
+        } else {
+            var12 = var11.getErrorStream() != null ? var11.getErrorStream() : var11.getInputStream();
+        }
+
+        BufferedReader var14 = new BufferedReader(new InputStreamReader(var12, StandardCharsets.UTF_8));
+        StringBuilder var16 = new StringBuilder();
+
+        String var15;
+        while((var15 = var14.readLine()) != null) {
+            var16.append(var15).append("\n");
+        }
+
+        var14.close();
+        var11.disconnect();
+        logger.debug("responseCode: " + var13);
+        logger.debug("responseMessage: " + var11.getResponseMessage());
+    }
+
+    public static String callUrl(String var0, Map<String, Object> var1) throws IOException {
+        logger.debug("fullUrl: " + var0);
+        logger.debug("bodyMap: " + var1);
+        URL var2 = new URL(var0);
+        HttpURLConnection var3 = (HttpURLConnection)var2.openConnection();
+        var3.setRequestMethod("PUT");
+        var3.setRequestProperty("Content-Type", "application/json");
+        var3.setRequestProperty("technician_key", "TECH_KEY_XXXX");
+        var3.setDoOutput(true);
+        String var4 = mapToJson(var1);
+        logger.debug("requestBody: " + var4);
+        OutputStream var5 = var3.getOutputStream();
+        var5.write(var4.getBytes(StandardCharsets.UTF_8));
+        var5.flush();
+        var5.close();
+        int var7 = var3.getResponseCode();
+        InputStream var6;
+        if (var7 >= 200 && var7 < 300) {
+            var6 = var3.getInputStream();
+        } else {
+            var6 = var3.getErrorStream() != null ? var3.getErrorStream() : var3.getInputStream();
+        }
+
+        BufferedReader var8 = new BufferedReader(new InputStreamReader(var6, StandardCharsets.UTF_8));
+        StringBuilder var10 = new StringBuilder();
+
+        String var9;
+        while((var9 = var8.readLine()) != null) {
+            var10.append(var9).append("\n");
+        }
+
+        var8.close();
+        logger.debug("responseCode: " + var7);
+        logger.debug("responseMessage: " + var3.getResponseMessage());
+        if (var7 >= 200 && var7 < 300) {
+            return "success";
+        } else {
+            logger.debug("Failed to trigger service. HTTP error code : " + var7);
+            return "failed";
+        }
+    }
+
+    public static String pushG0toRequest(String var0, Map<String, Object> var1) throws IOException {
+        logger.debug("fullUrl: " + var0);
+        logger.debug("bodyMap: " + var1);
+        String var2 = mapToJson(var1);
+        logger.debug("requestBody: " + var2);
+        String var3 = URLEncoder.encode(var2, StandardCharsets.UTF_8);
+        logger.debug("encodedInputData: " + var3);
+        var0 = var0 + "?input_data=" + var3;
+        logger.debug("modifiedFullUrl: " + var0);
+        URL var4 = new URL(var0);
+        HttpURLConnection var5 = (HttpURLConnection)var4.openConnection();
+        var5.setRequestMethod("PUT");
+        var5.setRequestProperty("Content-Type", "application/json");
+        var5.setRequestProperty("technician_key", "TECH_KEY_XXXX");
+        var5.setDoOutput(true);
+        var5.connect();
+        int var7 = var5.getResponseCode();
+        InputStream var6;
+        if (var7 >= 200 && var7 < 300) {
+            var6 = var5.getInputStream();
+        } else {
+            var6 = var5.getErrorStream() != null ? var5.getErrorStream() : var5.getInputStream();
+        }
+
+        BufferedReader var8 = new BufferedReader(new InputStreamReader(var6, StandardCharsets.UTF_8));
+        StringBuilder var10 = new StringBuilder();
+
+        String var9;
+        while((var9 = var8.readLine()) != null) {
+            var10.append(var9).append("\n");
+        }
+
+        var8.close();
+        var5.disconnect();
+        logger.debug("responseCode: " + var7);
+        logger.debug("responseMessage: " + var5.getResponseMessage());
+        if (var7 >= 200 && var7 < 300) {
+            return "success";
+        } else {
+            logger.debug("Failed to trigger service. HTTP error code : " + var7);
+            return "failed";
+        }
+    }
+
+    public static String closeTicket(String var0, Map<String, Object> var1) throws IOException {
+        logger.debug("fullUrl: " + var0);
+        logger.debug("bodyMap: " + var1);
+        String var2 = mapToJson(var1);
+        logger.debug("requestBody: " + var2);
+        String var3 = URLEncoder.encode(var2, StandardCharsets.UTF_8);
+        logger.debug("encodedInputData: " + var3);
+        var0 = var0 + "?input_data=" + var3;
+        logger.debug("modifiedFullUrl: " + var0);
+        URL var4 = new URL(var0);
+        HttpURLConnection var5 = (HttpURLConnection)var4.openConnection();
+        var5.setRequestMethod("PUT");
+        var5.setRequestProperty("Content-Type", "application/json");
+        var5.setRequestProperty("technician_key", "TECH_KEY_XXXX");
+        var5.setDoOutput(true);
+        var5.connect();
+        int var7 = var5.getResponseCode();
+        InputStream var6;
+        if (var7 >= 200 && var7 < 300) {
+            var6 = var5.getInputStream();
+        } else {
+            var6 = var5.getErrorStream() != null ? var5.getErrorStream() : var5.getInputStream();
+        }
+
+        BufferedReader var8 = new BufferedReader(new InputStreamReader(var6, StandardCharsets.UTF_8));
+        StringBuilder var10 = new StringBuilder();
+
+        String var9;
+        while((var9 = var8.readLine()) != null) {
+            var10.append(var9).append("\n");
+        }
+
+        var8.close();
+        var5.disconnect();
+        logger.debug("responseCode: " + var7);
+        logger.debug("responseMessage: " + var5.getResponseMessage());
+        logger.debug("Response: " + var10);
+        if (var7 >= 200 && var7 < 300) {
+            return "success";
+        } else {
+            logger.debug("Failed to trigger service. HTTP error code : " + var7);
+            return "failed";
+        }
+    }
+
+    public static Response createOutSource(Map<String, Object> var0) throws GeneralException, InterruptedException, IOException {
+        context = SailPointFactory.getCurrentContext();
+        logger.debug("---> createOutSource(): " + var0);
+        UserNameUtil var1 = new UserNameUtil();
+        String var2 = calculateEmployeeNumber();
+        logger.debug("userNumber: " + var2);
+        String var3 = (String)var0.get("description");
+        logger.debug("description: " + var3);
+        String var4 = (String)var0.get("firstname");
+        if (StringUtils.isEmpty(var4)) {
+            logger.debug("firstname boş girilmiştir.");
+            HashMap var34 = new HashMap();
+            var34.put("action", "Create Consultant");
+            var34.put("source", "Manage Engine - Failed");
+            var34.put("application", "Active Directory");
+            var34.put("user", var2);
+            var0.put("message", "FirstName boş girildiği için işlem yapılmamıştır.");
+            var34.put("params", var0);
+            createAudit(var34);
+            HashMap var36 = new HashMap();
+            var36.put("message", "İsim boş girildiği için işlem yapılmamıştır.");
+            var36.put("status", "failed");
+            return Response.status(Status.BAD_REQUEST).entity(var36).build();
+        } else {
+            logger.debug("firstname: " + var4);
+            String var5 = (String)var0.get("lastname");
+            if (StringUtils.isEmpty(var5)) {
+                logger.debug("lastname boş girilmiştir.");
+                HashMap var35 = new HashMap();
+                var35.put("action", "Create Consultant");
+                var35.put("source", "Manage Engine - Failed");
+                var35.put("application", "Active Directory");
+                var35.put("user", var2);
+                var0.put("message", "LastName boş girildiği için işlem yapılmamıştır.");
+                var35.put("params", var0);
+                createAudit(var35);
+                HashMap var38 = new HashMap();
+                var38.put("message", "Soyisim boş girildiği için işlem yapılmamıştır.");
+                var38.put("status", "failed");
+                return Response.status(Status.BAD_REQUEST).entity(var38).build();
+            } else {
+                logger.debug("lastname: " + var5);
+                String var6 = (String)var0.get("mobilePhone");
+                if (StringUtils.isEmpty(var6)) {
+                    logger.debug("mobilePhone boş girilmiştir.");
+                    HashMap var37 = new HashMap();
+                    var37.put("action", "Create Consultant");
+                    var37.put("source", "Manage Engine - Failed");
+                    var37.put("application", "Active Directory");
+                    var37.put("user", var2);
+                    var0.put("message", "Telefon Numarası boş girildiği için işlem yapılmamıştır.");
+                    var37.put("params", var0);
+                    createAudit(var37);
+                    HashMap var40 = new HashMap();
+                    var40.put("message", "Telefon Numarası boş girildiği için işlem yapılmamıştır.");
+                    var40.put("status", "failed");
+                    return Response.status(Status.BAD_REQUEST).entity(var40).build();
+                } else {
+                    logger.debug("mobilePhone: " + var6);
+                    String var7 = (String)var0.get("companyName");
+                    if (StringUtils.isEmpty(var7)) {
+                        logger.debug("companyName boş girilmiştir.");
+                        HashMap var39 = new HashMap();
+                        var39.put("action", "Create Consultant");
+                        var39.put("source", "Manage Engine - Failed");
+                        var39.put("application", "Active Directory");
+                        var39.put("user", var2);
+                        var0.put("message", "companyName boş girildiği için işlem yapılmamıştır.");
+                        var39.put("params", var0);
+                        createAudit(var39);
+                        HashMap var41 = new HashMap();
+                        var41.put("message", "companyName boş girildiği için işlem yapılmamıştır.");
+                        var41.put("status", "failed");
+                        return Response.status(Status.BAD_REQUEST).entity(var41).build();
+                    } else {
+                        logger.debug("companyName: " + var7);
+                        String var8 = (String)var0.get("companyGroupName");
+                        logger.debug("companyGroupName: " + var8);
+                        String var9 = (String)var0.get("ticketId");
+                        if (StringUtils.isEmpty(var9)) {
+                            logger.debug("ticketId boş girilmiştir.");
+                            HashMap var42 = new HashMap();
+                            var42.put("action", "Create Consultant");
+                            var42.put("source", "Manage Engine - Failed");
+                            var42.put("application", "Active Directory");
+                            var42.put("user", var2);
+                            var0.put("message", "ticketId boş girildiği için işlem yapılmamıştır.");
+                            var42.put("params", var0);
+                            createAudit(var42);
+                            HashMap var44 = new HashMap();
+                            var44.put("message", "ticketId boş girildiği için işlem yapılmamıştır.");
+                            var44.put("status", "failed");
+                            return Response.status(Status.BAD_REQUEST).entity(var44).build();
+                        } else {
+                            logger.debug("ticketId: " + var9);
+                            String var10 = (String)var0.get("administrator");
+                            if (StringUtils.isEmpty(var10)) {
+                                logger.debug("administrator boş girilmiştir.");
+                                HashMap var43 = new HashMap();
+                                var43.put("action", "Create Consultant");
+                                var43.put("source", "Manage Engine - Failed");
+                                var43.put("application", "Active Directory");
+                                var43.put("user", var2);
+                                var0.put("message", "Administrator boş girildiği için işlem yapılmamıştır.");
+                                var43.put("params", var0);
+                                createAudit(var43);
+                                HashMap var46 = new HashMap();
+                                var46.put("message", "Administrator boş girildiği için işlem yapılmamıştır.");
+                                var46.put("status", "failed");
+                                return Response.status(Status.BAD_REQUEST).entity(var46).build();
+                            } else {
+                                if (StringUtils.startsWithIgnoreCase(var10, "U0")) {
+                                    var10 = var10.substring(2);
+                                }
+
+                                logger.debug("manager: " + var10);
+                                String var11 = (String)var0.get("mail");
+                                if (StringUtils.isEmpty(var11)) {
+                                    logger.debug("mail boş girilmiştir.");
+                                    HashMap var45 = new HashMap();
+                                    var45.put("action", "Create Consultant");
+                                    var45.put("source", "Manage Engine - Failed");
+                                    var45.put("application", "Active Directory");
+                                    var45.put("user", var2);
+                                    var0.put("message", "mail boş girildiği için işlem yapılmamıştır.");
+                                    var45.put("params", var0);
+                                    createAudit(var45);
+                                    HashMap var48 = new HashMap();
+                                    var48.put("message", "mail boş girildiği için işlem yapılmamıştır.");
+                                    var48.put("status", "failed");
+                                    return Response.status(Status.BAD_REQUEST).entity(var48).build();
+                                } else {
+                                    logger.debug("mail :" + var11);
+                                    Application var12 = (Application)context.getObjectByName(Application.class, "Active Directory");
+                                    logger.debug("application: " + var12);
+                                    Identity var13 = (Identity)context.getObjectByName(Identity.class, var2);
+                                    logger.debug("Identity userNumber: " + var2);
+                                    if (null != var13) {
+                                        HashMap var49 = new HashMap();
+                                        var49.put("status", "error");
+                                        var49.put("message", "Identity with name " + var2 + " is already exists.");
+                                        logger.debug("errorHashMap: " + var49);
+                                        return Response.status(Status.CONFLICT).entity(var49).build();
+                                    } else {
+                                        logger.debug("identity has started to be generated");
+                                        var13 = new Identity();
+                                        var13.setProtected(true);
+                                        var13.setType("Consultant".toLowerCase());
+                                        var13.setName(var2);
+                                        String var14 = var1.generateUsername(var4, var5, true, " ", CapitalizationStyle.CAPITAL_FIRST_LETTERS, UserNameStyle.FIRST_NAME_DOT_LAST_NAME, NameChoosingPolicy.CHOOSE_FIRST_ONE, NameChoosingPolicy.CHOOSE_FIRST_ONE);
+                                        var13.setFirstname(var4);
+                                        var13.setAttribute("userNumber", var2);
+                                        var13.setAttribute("lastname", var5);
+                                        var13.setDisplayName(var14);
+                                        var13.setAttribute("companyName", var7);
+                                        var13.setAttribute("ticketId", var9);
+                                        var13.setAttribute("mail", var11);
+                                        var13.setAttribute("mobilePhone", var6);
+                                        var13.setAttribute("companyGroupName", var8);
+                                        Identity var15 = (Identity)context.getObjectByName(Identity.class, var10);
+                                        if (null != var15) {
+                                            var13.setAdministrator(var15);
+                                        }
+
+                                        if (null != var3) {
+                                            var13.setAttribute("description", var3);
+                                        }
+
+                                        context.saveObject(var13);
+                                        context.commitTransaction();
+                                        logger.debug("identity commit edildi 10 saniye bekleniyor...");
+                                        Thread.sleep(10000L);
+                                        logger.debug("10 saniye beklendi identity idm üzerinden kontrol edilecek");
+                                        Identity var16 = (Identity)context.getObjectByName(Identity.class, var2);
+                                        if (null == var16) {
+                                            logger.debug("consultant IDM üzerinde oluşturulamadı");
+                                            HashMap var50 = new HashMap();
+                                            var50.put("action", "Create Consultant");
+                                            var50.put("source", "Manage Engine - Failed");
+                                            var50.put("application", "Active Directory");
+                                            var50.put("user", var2);
+                                            var0.put("message", var2 + " sicilli Danışman kimliği SailPoint üzerinde oluşturulamadı.");
+                                            var50.put("params", var0);
+                                            createAudit(var50);
+                                            HashMap var52 = new HashMap();
+                                            var52.put("status", "error");
+                                            var52.put("message", var2 + " sicilli Danışman kimliği SailPoint üzerinde oluşturulamamıştır.");
+                                            logger.debug("errorHashMap: " + var52);
+                                            return Response.status(Status.NOT_FOUND).entity(var52).build();
+                                        } else {
+                                            logger.debug("identity IDM uzerinde olusturuldu. createG0Accounts metodu cagriliyor.");
+                                            boolean var17 = createG0Accounts(var16);
+                                            logger.debug("createG0Accounts metodu cagrildi");
+                                            if (!var17) {
+                                                logger.debug("fail");
+                                                HashMap var51 = new HashMap();
+                                                var51.put("message", "İşlem başarısız");
+                                                var51.put("status", "failed");
+                                                HashMap var53 = new HashMap();
+                                                var53.put("action", "Create Consultant");
+                                                var53.put("source", "Manage Engine - Failed");
+                                                var53.put("application", var12.getName());
+                                                var53.put("user", var2);
+                                                var0.put("message", "Beklenilmeyen bir hata sonucu işlem uç sistemde yapılamamıştır.");
+                                                var53.put("params", var0);
+                                                logger.debug("fail response");
+                                                createAudit(var53);
+                                                return Response.status(Status.CONFLICT).entity(var51).build();
+                                            } else {
+                                                Map var18 = getTasks(var9);
+                                                String var19 = "https://burganteknoloji.ebt.bank:8080/api/v3/requests/" + var9;
+                                                HashMap var20 = new HashMap();
+                                                HashMap var21 = new HashMap();
+                                                var21.put("udf_sline_3001", "ilgili_" + var2 + "hesap kodu");
+                                                HashMap var22 = new HashMap();
+                                                var22.put("udf_fields", var21);
+                                                var20.put("request", var22);
+                                                String var23 = pushG0toRequest(var19, var20);
+                                                logger.debug("callUrlResult: " + var23);
+                                                String var24 = (String)var18.get(TaskNames.TASK_1.getTaskName());
+                                                logger.debug("g0TaskId: " + var24);
+                                                setWorkLogToTasks(var9, var24);
+                                                String var25 = "https://burganteknoloji.ebt.bank:8080/api/v3/requests/" + var9 + "/tasks/" + var24 + "/close";
+                                                String var26 = callUrl(var25, new HashMap());
+                                                logger.debug("taskCloseResult: " + var26);
+                                                boolean var27 = createC9Accounts(var16);
+                                                logger.debug("createC9Accounts metodu cagrildi");
+                                                if (!var27) {
+                                                    logger.debug("fail");
+                                                    HashMap var54 = new HashMap();
+                                                    var54.put("message", "İşlem başarısız");
+                                                    var54.put("status", "failed");
+                                                    HashMap var55 = new HashMap();
+                                                    var55.put("action", "Create Consultant");
+                                                    var55.put("source", "Manage Engine - Failed");
+                                                    var55.put("application", "Active Directory - Cyberark Accounts");
+                                                    var55.put("user", var2);
+                                                    var0.put("message", "Beklenilmeyen bir hata sonucu işlem uç sistemde yapılamamıştır.");
+                                                    var55.put("params", var0);
+                                                    logger.debug("fail response");
+                                                    createAudit(var55);
+                                                    return Response.status(Status.CONFLICT).entity(var54).build();
+                                                } else {
+                                                    logger.debug("success");
+                                                    HashMap var28 = new HashMap();
+                                                    var28.put("message", "İşlem başarılı");
+                                                    var28.put("status", "success");
+                                                    String var29 = (String)var18.get(TaskNames.TASK_2.getTaskName());
+                                                    logger.debug("c9TaskId: " + var29);
+                                                    setWorkLogToTasks(var9, var29);
+                                                    String var30 = (String)var0.get("remoteMachines");
+                                                    if (StringUtils.isNotEmpty(var30)) {
+                                                        logger.debug("remoteMachines: " + var30);
+                                                        logger.debug("create cyberark account metodu çağrıldı.");
+                                                        createCyberArkAccount(var30, var2);
+                                                    } else {
+                                                        String var31 = "CyberArk Operation Notification";
+                                                        HashMap var32 = new HashMap();
+                                                        var32.put("sAMAccountName", var2);
+                                                        var32.put("caName", var2.replace("G0", "C9"));
+                                                        ArrayList var33 = new ArrayList();
+                                                        var33.add("test@burgan.com.tr");
+                                                        var33.add("test2@burgan.com.tr");
+                                                        notify(var31, var33, (List)null, (List)null, var32);
+                                                    }
+
+                                                    String var56 = (String)var18.get(TaskNames.TASK_5.getTaskName());
+                                                    logger.debug("cyberArkTaskId: " + var56);
+                                                    setWorkLogToTasks(var9, var56);
+                                                    HashMap var57 = new HashMap();
+                                                    var57.put("action", "Create Consultant");
+                                                    var57.put("source", "Manage Engine - Success");
+                                                    var57.put("application", var12.getName());
+                                                    var57.put("user", var2);
+                                                    var0.put("message", "İşlem başarılı bir şekilde gerçekleştirilmiştir.");
+                                                    var57.put("params", var0);
+                                                    logger.debug("success response");
+                                                    createAudit(var57);
+                                                    return Response.status(Status.OK).entity(var28).build();
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    public static Response closeTrainingTask(Map<String, Object> var0) throws GeneralException, IOException {
+        context = SailPointFactory.getCurrentContext();
+        logger.debug("closeTrainingTask --> " + var0);
+        String var1 = (String)var0.get("userNumber");
+        logger.debug("userNumber: " + var1);
+        if (StringUtils.isEmpty(var1)) {
+            logger.debug("userNumber boş girilmiştir.");
+            HashMap var36 = new HashMap();
+            var36.put("action", "Close Task - Consultant");
+            var36.put("source", "Manage Engine - Failed");
+            var36.put("application", "Active Directory");
+            var36.put("user", var1);
+            var0.put("message", "Danışman sicili boş girildiği için işlem yapılmamıştır.");
+            var36.put("params", var0);
+            createAudit(var36);
+            HashMap var39 = new HashMap();
+            var39.put("status", "failed");
+            var39.put("message", "userNumber alanı boş girilemez!");
+            logger.debug("errorMap: " + var39);
+            return Response.status(Status.BAD_REQUEST).entity(var39).build();
+        } else if (!StringUtils.startsWithIgnoreCase(var1, "G0")) {
+            logger.debug("userNumber hatalı girilmiştir.");
+            HashMap var35 = new HashMap();
+            var35.put("action", "Close Task - Consultant");
+            var35.put("source", "Manage Engine - Failed");
+            var35.put("application", "Active Directory");
+            var35.put("user", var1);
+            var0.put("message", "Danışman sicili hatalı girildiği için işlem yapılmamıştır.");
+            var35.put("params", var0);
+            createAudit(var35);
+            HashMap var38 = new HashMap();
+            var38.put("status", "failed");
+            var38.put("message", "userNumber alanı boş girilemez!");
+            logger.debug("errorMap: " + var38);
+            return Response.status(Status.BAD_REQUEST).entity(var38).build();
+        } else {
+            String var2 = (String)var0.get("ticketId");
+            logger.debug("ticketId: " + var2);
+            if (StringUtils.isEmpty(var2)) {
+                logger.debug("ticketId boş girilmiştir.");
+                HashMap var37 = new HashMap();
+                var37.put("action", "Add Entitlements - Consultant");
+                var37.put("source", "Manage Engine - Failed");
+                var37.put("user", var1);
+                var37.put("application", "Active Directory");
+                var0.put("message", "ticketId boş girildiği için işlem yapılmamıştır.");
+                var37.put("params", var0);
+                createAudit(var37);
+                HashMap var41 = new HashMap();
+                var41.put("status", "failed");
+                var41.put("message", "ticketId alanı boş girilemez!");
+                logger.debug("errorMap: " + var41);
+                return Response.status(Status.BAD_REQUEST).entity(var41).build();
+            } else {
+                Identity var3 = (Identity)context.getObjectByName(Identity.class, var1);
+                if (null == var3) {
+                    logger.debug("kimlik bulunamamıştır");
+                    HashMap var40 = new HashMap();
+                    var40.put("action", "Close Task - Consultant");
+                    var40.put("source", "Manage Engine - Failed");
+                    var40.put("application", "Active Directory");
+                    var40.put("user", var1);
+                    var0.put("message", "Danışman kimliği bulunamadığı için işlem yapılmamıştır.");
+                    var40.put("params", var0);
+                    createAudit(var40);
+                    HashMap var42 = new HashMap();
+                    var42.put("status", "failed");
+                    var42.put("message", "kimlik bulunamamıştır!");
+                    logger.debug("errorMap: " + var42);
+                    return Response.status(Status.NOT_FOUND).entity(var42).build();
+                } else {
+                    QueryOptions var4 = new QueryOptions();
+                    var4.add(new Filter[]{Filter.eq("application.name", "Active Directory")});
+                    List var5 = context.getObjects(ManagedAttribute.class, var4);
+                    if (CollectionUtils.isEmpty(var5)) {
+                        logger.debug("mas bulunamamıştır");
+                        HashMap var43 = new HashMap();
+                        var43.put("action", "Close Task - Consultant");
+                        var43.put("source", "Manage Engine - Failed");
+                        var43.put("application", "Active Directory");
+                        var43.put("user", var1);
+                        var0.put("message", "AD yetkileri bulunamamıştır.");
+                        var43.put("params", var0);
+                        createAudit(var43);
+                        HashMap var44 = new HashMap();
+                        var44.put("status", "failed");
+                        var44.put("message", "AD yetkileri bulunamamıştır");
+                        logger.debug("errorMap: " + var44);
+                        return Response.status(Status.NOT_FOUND).entity(var44).build();
+                    } else {
+                        Map var6 = getTasks(var2);
+                        String var7 = "";
+                        String var8 = (String)var3.getAttribute("companyGroupName");
+                        logger.debug("companyGroupName:: " + var8);
+                        if (var6.containsKey("companyGroupName")) {
+                            var7 = (String)var6.get("companyGroupName");
+                            logger.debug("desc");
+                        }
+
+                        if (!StringUtils.startsWithIgnoreCase(var8, "VPN_EXTERNAL_")) {
+                            var8 = var7;
+                            logger.debug("new companyGroupName: " + var7);
+                        }
+
+                        logger.debug("last companyGroupName: " + var8);
+                        ManagedAttribute var9 = null;
+
+                        for(ManagedAttribute var11 : var5) {
+                            if (!StringUtils.isEmpty(var8) && StringUtils.containsIgnoreCase(var11.getValue(), var8)) {
+                                var9 = var11;
+                            }
+                        }
+
+                        if (null == var9) {
+                            logger.debug("company yetkisi bulunamamıştır");
+                            HashMap var46 = new HashMap();
+                            var46.put("action", "Close Task - Consultant");
+                            var46.put("source", "Manage Engine - Failed");
+                            var46.put("application", "Active Directory");
+                            var46.put("user", var1);
+                            var0.put("message", "company yetkisi bulunamamıştır.");
+                            var46.put("params", var0);
+                            createAudit(var46);
+                            HashMap var48 = new HashMap();
+                            var48.put("status", "failed");
+                            var48.put("message", "company yetkisi bulunamamıştır.");
+                            logger.debug("errorMap: " + var48);
+                            return Response.status(Status.NOT_FOUND).entity(var48).build();
+                        } else {
+                            IdentityService var45 = new IdentityService(context);
+                            Application var47 = (Application)context.getObjectByName(Application.class, "Active Directory");
+                            List var12 = var45.getLinks(var3, var47);
+                            if (CollectionUtils.isEmpty(var12)) {
+                                logger.debug("adLinks is null");
+                                HashMap var49 = new HashMap();
+                                var49.put("action", "Close Task - Consultant");
+                                var49.put("source", "Manage Engine - Failed");
+                                var49.put("application", "Active Directory");
+                                var49.put("user", var1);
+                                var0.put("message", "Sicile ait ad linki bulunamamıştır.");
+                                var49.put("params", var0);
+                                createAudit(var49);
+                                HashMap var52 = new HashMap();
+                                var52.put("status", "failed");
+                                var52.put("message", "Sicile ait ad linki bulunamamıştır.");
+                                logger.debug("errorMap: " + var52);
+                                return Response.status(Status.NOT_FOUND).entity(var52).build();
+                            } else {
+                                Link var13 = null;
+
+                                for(Link var15 : var12) {
+                                    String var16 = (String)var15.getAttribute("sAMAccountName");
+                                    if (StringUtils.startsWithIgnoreCase(var16, "G0")) {
+                                        var13 = var15;
+                                    }
+                                }
+
+                                if (null == var13) {
+                                    logger.debug("ilgili AD linki bulunamamıştır");
+                                    HashMap var51 = new HashMap();
+                                    var51.put("action", "Close Task - Consultant");
+                                    var51.put("source", "Manage Engine - Failed");
+                                    var51.put("application", "Active Directory");
+                                    var51.put("user", var1);
+                                    var0.put("message", "G0 sicilli ad link bulunamamıştır.");
+                                    var51.put("params", var0);
+                                    createAudit(var51);
+                                    HashMap var54 = new HashMap();
+                                    var54.put("status", "failed");
+                                    var54.put("message", "G0 sicilli ad link bulunamamıştır.");
+                                    logger.debug("errorMap: " + var54);
+                                    return Response.status(Status.NOT_FOUND).entity(var54).build();
+                                } else {
+                                    logger.debug("yetki ekleme plani olusturuluyor...");
+                                    ProvisioningPlan var50 = new ProvisioningPlan();
+                                    ProvisioningPlan.AccountRequest var53 = new ProvisioningPlan.AccountRequest();
+                                    ProvisioningPlan.AttributeRequest var55 = new ProvisioningPlan.AttributeRequest();
+                                    var53.setOperation(Operation.Modify);
+                                    var53.setNativeIdentity(var13.getNativeIdentity());
+                                    var53.setApplication(var47.getName());
+                                    var55.setOp(sailpoint.object.ProvisioningPlan.Operation.Add);
+                                    var55.setName("memberOf");
+                                    var55.setValue(var9.getValue());
+                                    var55.setAssignment(false);
+                                    var53.add(var55);
+                                    var50.add(var53);
+                                    var50.setIdentity(var3);
+                                    var50.setSource(Source.WebService);
+                                    var50.setSourceName("Add Network MemberOf for: " + var1);
+                                    Logger var10000 = logger;
+                                    String var10001 = System.lineSeparator();
+                                    var10000.debug("networkMemberOfPlanToXML" + var10001 + var50.toXml());
+                                    boolean var17 = executePlan(var50);
+                                    logger.debug("executed plan result: " + var17);
+                                    if (!var17) {
+                                        logger.debug("failed");
+                                        HashMap var56 = new HashMap();
+                                        var56.put("message", "İşlem beklenilmeyen durumlardan dolayı yapılamamıştır.");
+                                        var56.put("status", "success");
+                                        HashMap var57 = new HashMap();
+                                        var57.put("action", "Close Task - Consultant");
+                                        var57.put("source", "Manage Engine - Failed");
+                                        var57.put("application", "Active Directory");
+                                        var57.put("user", var1);
+                                        var0.put("message", "İşlem beklenilmeyen durumlardan dolayı yapılamamıştır.");
+                                        var57.put("params", var0);
+                                        createAudit(var57);
+                                        logger.debug("failed response ");
+                                        return Response.status(Status.EXPECTATION_FAILED).entity(var56).build();
+                                    } else {
+                                        String var18 = (String)var6.get(TaskNames.TASK_3.getTaskName());
+                                        logger.debug("mfaExternalTaskId: " + var18);
+                                        setWorkLogToTasks(var2, var18);
+                                        String var19 = (String)var6.get(TaskNames.TASK_4.getTaskName());
+                                        logger.debug("trainingCloseTaskId: " + var19);
+                                        setWorkLogToTasks(var2, var19);
+                                        String var20 = (String)var6.get(TaskNames.TASK_2.getTaskName());
+                                        logger.debug("c9TaskId: " + var20);
+                                        String var21 = (String)var6.get(TaskNames.TASK_5.getTaskName());
+                                        logger.debug("cyberarkTaskId: " + var21);
+                                        String var22 = "https://burganteknoloji.ebt.bank:8080/api/v3/requests/" + var2 + "/tasks/" + var20 + "/close";
+                                        String var23 = callUrl(var22, new HashMap());
+                                        String var24 = callUrl(var22.replace(var20, var18), new HashMap());
+                                        String var25 = callUrl(var22.replace(var20, var21), new HashMap());
+                                        String var26 = callUrl(var22.replace(var20, var19), new HashMap());
+                                        logger.debug("c9taskCloseResult: " + var23);
+                                        logger.debug("mfaTaskCloseResult: " + var24);
+                                        logger.debug("cyberarkTaskCloseResult: " + var25);
+                                        logger.debug("trainingTaskCloseResult: " + var26);
+                                        String var27 = "https://burganteknoloji.ebt.bank:8080/api/v3/requests/" + var2;
+                                        HashMap var28 = new HashMap();
+                                        HashMap var29 = new HashMap();
+                                        var29.put("content", var1 + " ve " + var1.replace("G0", "C9") + "sicilli hesaplar açılmıştır.");
+                                        HashMap var30 = new HashMap();
+                                        var30.put("name", "Resolved");
+                                        HashMap var31 = new HashMap();
+                                        var31.put("resolution", var29);
+                                        var31.put("status", var30);
+                                        var28.put("request", var31);
+                                        String var32 = closeTicket(var27, var28);
+                                        logger.debug("callUrlResult: " + var32);
+                                        logger.debug("success");
+                                        HashMap var33 = new HashMap();
+                                        var33.put("message", "İşlem başarılı bir şekilde gerçekleştirilmiştir.");
+                                        var33.put("status", "success");
+                                        HashMap var34 = new HashMap();
+                                        var34.put("action", "Close Task - Consultant");
+                                        var34.put("source", "Manage Engine - Success");
+                                        var34.put("application", "Active Directory");
+                                        var34.put("user", var1);
+                                        var0.put("message", "İşlem Başarılı bir şekilde gerçekleştirilmiştir.");
+                                        var34.put("params", var0);
+                                        createAudit(var34);
+                                        logger.debug("success response ");
+                                        return Response.status(Status.OK).entity(var33).build();
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    public static Response createCompanyGroup(Map<String, Object> var0) throws GeneralException {
+        context = SailPointFactory.getCurrentContext();
+        String var1 = (String)var0.get("ticketId");
+        logger.debug("ticketId: " + var1);
+        if (StringUtils.isEmpty(var1)) {
+            logger.debug("ticketId boş girilmiştir.");
+            HashMap var11 = new HashMap();
+            var11.put("action", "Create Company Group - Consultant");
+            var11.put("source", "Manage Engine - Failed");
+            var11.put("application", "Active Directory");
+            var0.put("message", "ticketId boş girildiği için işlem yapılmamıştır.");
+            var11.put("params", var0);
+            createAudit(var11);
+            HashMap var13 = new HashMap();
+            var13.put("status", "failed");
+            var13.put("message", "ticketId alanı boş girilemez!");
+            logger.debug("errorMap: " + var13);
+            return Response.status(Status.BAD_REQUEST).entity(var13).build();
+        } else {
+            String var2 = (String)var0.get("groupName");
+            logger.debug("groupName: " + var2);
+            if (StringUtils.isEmpty(var2)) {
+                logger.debug("groupName boş girilmiştir.");
+                HashMap var12 = new HashMap();
+                var12.put("action", "Create Company Group - Consultant");
+                var12.put("source", "Manage Engine - Failed");
+                var12.put("application", "Active Directory");
+                var0.put("message", "groupName boş girildiği için işlem yapılmamıştır.");
+                var12.put("params", var0);
+                createAudit(var12);
+                HashMap var14 = new HashMap();
+                var14.put("status", "failed");
+                var14.put("message", "groupName alanı boş girilemez!");
+                logger.debug("errorMap: " + var14);
+                return Response.status(Status.BAD_REQUEST).entity(var14).build();
+            } else {
+                Application var3 = (Application)context.getObjectByName(Application.class, "Active Directory");
+                logger.debug("app: " + var3);
+                String var4 = "CN=" + var2 + ",OU=IDM,OU=SailPointTest,DC=ebt,DC=bank";
+                ManagedAttribute var5 = (ManagedAttribute)context.getUniqueObject(ManagedAttribute.class, Filter.like("value", var4));
+                logger.debug("ma: " + var5);
+                if (null != var5) {
+                    logger.debug("ma bos degil.");
+                    HashMap var15 = new HashMap();
+                    var15.put("action", "Create Group");
+                    var15.put("source", "Manage Engine - Failed");
+                    var15.put("application", "Active Directory");
+                    var15.put("user", "Active Directory");
+                    var0.put("message", "IDM üzerinde" + var4 + " değerine sahip ManageAttribute bulunmaktadır.");
+                    var15.put("params", var0);
+                    createAudit(var15);
+                    logger.debug("ma : " + var5.getValue());
+                    HashMap var16 = new HashMap();
+                    var16.put("status", "error");
+                    var16.put("message", "Group with name " + var2 + " already exists.");
+                    var16.put("groupInfo", var5.getValue());
+                    return Response.status(Status.CONFLICT).entity(var16).build();
+                } else {
+                    ProvisioningPlan var6 = new ProvisioningPlan();
+                    ProvisioningPlan.ObjectRequest var7 = new ProvisioningPlan.ObjectRequest();
+                    var7.setApplication(var3.getName());
+                    var7.setTargetIntegration(var3.getName());
+                    var7.setOp(ObjectOperation.Create);
+                    var7.setType("group");
+                    var7.add(new ProvisioningPlan.AttributeRequest("distinguishedName", sailpoint.object.ProvisioningPlan.Operation.Set, var4));
+                    var7.add(new ProvisioningPlan.AttributeRequest("sAMAccountName", sailpoint.object.ProvisioningPlan.Operation.Set, var2));
+                    var7.add(new ProvisioningPlan.AttributeRequest("displayName", sailpoint.object.ProvisioningPlan.Operation.Set, var2));
+                    var7.add(new ProvisioningPlan.AttributeRequest("GroupType", sailpoint.object.ProvisioningPlan.Operation.Set, "Security"));
+                    var7.add(new ProvisioningPlan.AttributeRequest("GroupScope", sailpoint.object.ProvisioningPlan.Operation.Set, "Global"));
+                    var6.add(var7);
+                    var6.setSource(Source.WebService);
+                    var6.setSourceName("ManageEngine - Create Security Group: " + var2);
+                    boolean var8 = executePlan(var6);
+                    logger.debug("Plan was executed.");
+                    logger.debug("ProvisioningTransaction için filtre oluşturuldu.");
+                    if (!var8) {
+                        logger.debug("fail");
+                        HashMap var17 = new HashMap();
+                        var17.put("message", "İşlem başarısız");
+                        var17.put("status", "failed");
+                        HashMap var18 = new HashMap();
+                        var18.put("action", "Create Group");
+                        var18.put("source", "Manage Engine - Failed");
+                        var18.put("application", "Active Directory");
+                        var0.put("message", "Beklenilmeyen bir hata sonucu işlem uç sistemde yapılamamıştır.");
+                        var18.put("params", var0);
+                        createAudit(var18);
+                        logger.debug("fail response");
+                        return Response.status(Status.CONFLICT).entity(var17).build();
+                    } else {
+                        logger.debug("success");
+                        HashMap var9 = new HashMap();
+                        var9.put("message", "İşlem başarılı bir şekilde gerçekleştirilmiştir.");
+                        var9.put("status", "success");
+                        HashMap var10 = new HashMap();
+                        var10.put("action", "Create Group");
+                        var10.put("source", "Manage Engine - Success");
+                        var10.put("application", "Active Directory");
+                        var0.put("message", "İşlem Başarılı bir şekilde gerçekleştirilmiştir.");
+                        var10.put("params", var0);
+                        createAudit(var10);
+                        logger.debug("success response ");
+                        return Response.status(Status.OK).entity(var9).build();
+                    }
+                }
+            }
+        }
+    }
+
+    public static Response addEntitlements(Map<String, Object> var0) throws GeneralException {
+        context = SailPointFactory.getCurrentContext();
+        String var1 = (String)var0.get("userNumber");
+        logger.debug("userNumber: " + var1);
+        if (StringUtils.isEmpty(var1)) {
+            logger.debug("userNumber boş girilmiştir.");
+            HashMap var20 = new HashMap();
+            var20.put("action", "Add Entitlements - Consultant");
+            var20.put("source", "Manage Engine - Failed");
+            var20.put("application", "Active Directory");
+            var20.put("user", var1);
+            var0.put("message", "Danışman sicili boş girildiği için işlem yapılmamıştır.");
+            var20.put("params", var0);
+            createAudit(var20);
+            HashMap var22 = new HashMap();
+            var22.put("status", "failed");
+            var22.put("message", "userNumber alanı boş girilemez!");
+            logger.debug("errorMap: " + var22);
+            return Response.status(Status.BAD_REQUEST).entity(var22).build();
+        } else {
+            String var2 = (String)var0.get("entitlements");
+            if (StringUtils.isEmpty(var2)) {
+                logger.debug("entitlement boş girilmiştir.");
+                HashMap var21 = new HashMap();
+                var21.put("action", "Add Entitlements - Consultant");
+                var21.put("source", "Manage Engine - Failed");
+                var21.put("application", "Active Directory");
+                var21.put("user", var1);
+                var0.put("message", "entitlementStr boş girildiği için işlem yapılmamıştır.");
+                var21.put("params", var0);
+                createAudit(var21);
+                HashMap var24 = new HashMap();
+                var24.put("status", "failed");
+                var24.put("message", "entitlements alanı boş girilemez!");
+                logger.debug("errorMap: " + var24);
+                return Response.status(Status.BAD_REQUEST).entity(var24).build();
+            } else {
+                logger.debug("entitlementStr: " + var2);
+                String var3 = (String)var0.get("application");
+                if (StringUtils.isEmpty(var3)) {
+                    logger.debug("applicationName boş girilmiştir.");
+                    HashMap var23 = new HashMap();
+                    var23.put("action", "Add Entitlements - Consultant");
+                    var23.put("source", "Manage Engine - Failed");
+                    var23.put("application", "Active Directory");
+                    var23.put("user", var1);
+                    var0.put("message", "ApplicationName boş girildiği için işlem yapılmamıştır.");
+                    var23.put("params", var0);
+                    createAudit(var23);
+                    HashMap var25 = new HashMap();
+                    var25.put("status", "failed");
+                    var25.put("message", "applicationName alanı boş girilemez!");
+                    logger.debug("errorMap: " + var25);
+                    return Response.status(Status.BAD_REQUEST).entity(var25).build();
+                } else {
+                    logger.debug("applicationName: " + var3);
+                    List var4 = Arrays.asList(var2.split(";"));
+                    logger.debug("entitlements: " + var4);
+                    String var5 = (String)var0.get("ticketId");
+                    if (StringUtils.isEmpty(var5)) {
+                        logger.debug("ticketId boş girilmiştir.");
+                        HashMap var26 = new HashMap();
+                        var26.put("action", "Add Entitlements - Consultant");
+                        var26.put("source", "Manage Engine - Failed");
+                        var26.put("application", "Active Directory");
+                        var26.put("user", var1);
+                        var0.put("message", "ticketId boş girildiği için işlem yapılmamıştır.");
+                        var26.put("params", var0);
+                        createAudit(var26);
+                        HashMap var28 = new HashMap();
+                        var28.put("status", "failed");
+                        var28.put("message", "ticketId alanı boş girilemez!");
+                        logger.debug("errorMap: " + var28);
+                        return Response.status(Status.BAD_REQUEST).entity(var28).build();
+                    } else {
+                        logger.debug("ticketID: " + var5);
+                        Identity var6 = (Identity)context.getObjectByName(Identity.class, var1);
+                        logger.debug("consultant: " + var6);
+                        if (null == var6) {
+                            logger.debug("consultant boş");
+                            HashMap var27 = new HashMap();
+                            var27.put("action", "Add Entitlement - Consultant");
+                            var27.put("source", "Manage Engine - Failed");
+                            var27.put("application", "Active Directory");
+                            var27.put("user", var1);
+                            var0.put("message", var1 + " siciline sahip danışman bulunamamıştır.");
+                            var27.put("params", var0);
+                            createAudit(var27);
+                            HashMap var29 = new HashMap();
+                            var29.put("status", "failed");
+                            var29.put("message", var1 + " siciline sahip danışman bulunamamıştır.");
+                            logger.debug("errorMap: " + var29);
+                            return Response.status(Status.NOT_FOUND).entity(var29).build();
+                        } else {
+                            IdentityService var7 = new IdentityService(context);
+                            Application var8;
+                            if (StringUtils.equalsIgnoreCase(var3, "consultant")) {
+                                var8 = (Application)context.getObjectByName(Application.class, "Active Directory");
+                            } else {
+                                if (!StringUtils.equalsIgnoreCase(var3, "cyberark")) {
+                                    logger.debug("appName consultant ya da cyberark olarak girilmemiş");
+                                    HashMap var30 = new HashMap();
+                                    var30.put("action", "Add Entitlement - Consultant");
+                                    var30.put("source", "Manage Engine - Failed");
+                                    var30.put("application", var3);
+                                    var30.put("user", var1);
+                                    var0.put("message", var3 + " isimli uygulama bulunmamaktadır.");
+                                    var30.put("params", var0);
+                                    createAudit(var30);
+                                    HashMap var32 = new HashMap();
+                                    var32.put("status", "failed");
+                                    var32.put("message", var3 + " isimli uygulama bulunmamaktadır.");
+                                    logger.debug("errorMap: " + var32);
+                                    return Response.status(Status.NOT_FOUND).entity(var32).build();
+                                }
+
+                                var8 = (Application)context.getObjectByName(Application.class, "Active Directory - Cyberark Accounts");
+                            }
+
+                            List var9 = var7.getLinks(var6, var8);
+                            if (null == var9) {
+                                logger.debug("adLinks boş");
+                                HashMap var31 = new HashMap();
+                                var31.put("action", "Add Entitlement - Consultant");
+                                var31.put("source", "Manage Engine - Failed");
+                                var31.put("application", "Active Directory");
+                                var31.put("user", var1);
+                                var0.put("message", var1 + " siciline sahip active directory hesabı bulunamamıştır.");
+                                var31.put("params", var0);
+                                createAudit(var31);
+                                HashMap var33 = new HashMap();
+                                var33.put("status", "failed");
+                                var33.put("message", "girilen " + var1 + " siciline sahip active directory hesabı bulunamamıştır.");
+                                logger.debug("errorMap: " + var33);
+                                return Response.status(Status.NOT_FOUND).entity(var33).build();
+                            } else {
+                                Link var10 = (Link)var9.get(0);
+                                String var11 = var10.getNativeIdentity();
+                                ArrayList var12 = new ArrayList();
+                                ArrayList var13 = new ArrayList();
+
+                                for(String var15 : var4) {
+                                    ManagedAttribute var16 = (ManagedAttribute)context.getUniqueObject(ManagedAttribute.class, Filter.like("value", "CN=" + var15, MatchMode.START));
+                                    if (null != var16) {
+                                        logger.debug("ma Value: " + var16.getValue());
+                                        if (!checkMemberOf(var16.getValue(), var11)) {
+                                            var12.add(var16.getValue());
+                                        }
+                                    } else {
+                                        var13.add(var15);
+                                    }
+                                }
+
+                                logger.debug("ma values were checked.");
+                                if (CollectionUtils.isNotEmpty(var13)) {
+                                    HashMap var36 = new HashMap();
+                                    var36.put("action", "Add Entitlement - Consultant");
+                                    var36.put("source", "Manage Engine - Failed");
+                                    var36.put("application", "Active Directory");
+                                    var36.put("user", var1);
+                                    var0.put("message", "Girilen değerlere ait yetikler bulunamamıştır.");
+                                    var36.put("params", var0);
+                                    createAudit(var36);
+                                    HashMap var39 = new HashMap();
+                                    var39.put("message", "Girilen değerlere ait yetikler bulunamamıştır.");
+                                    var39.put("entitlements", var13);
+                                    var39.put("status", "failed");
+                                    return Response.status(Status.NOT_FOUND).entity(var39).build();
+                                } else if (CollectionUtils.isEmpty(var12)) {
+                                    HashMap var35 = new HashMap();
+                                    var35.put("action", "Add Entitlement - Consultant");
+                                    var35.put("source", "Manage Engine - Failed");
+                                    var35.put("application", "Active Directory");
+                                    var35.put("user", var1);
+                                    var0.put("message", "Girilen değerlere ait yetikler danışmanda mevcuttur.");
+                                    var35.put("params", var0);
+                                    createAudit(var35);
+                                    HashMap var38 = new HashMap();
+                                    var38.put("message", "Girilen değerlere ait yetikler danışmanda mevcuttur.");
+                                    var38.put("entitlements", var13);
+                                    var38.put("status", "failed");
+                                    return Response.status(Status.CONFLICT).entity(var38).build();
+                                } else {
+                                    logger.debug("maValues: " + var12);
+                                    ProvisioningPlan var34 = new ProvisioningPlan();
+                                    ProvisioningPlan.AccountRequest var37 = new ProvisioningPlan.AccountRequest();
+                                    ProvisioningPlan.AttributeRequest var40 = new ProvisioningPlan.AttributeRequest();
+                                    var37.setNativeIdentity(var11);
+                                    var37.setApplication(var8.getName());
+                                    var37.setOperation(Operation.Modify);
+                                    var40.setOperation(sailpoint.object.ProvisioningPlan.Operation.Add);
+                                    var40.setName("memberOf");
+                                    var40.setValue(var12);
+                                    var37.add(var40);
+                                    var34.setIdentity(var6);
+                                    var34.setSource(Source.WebService);
+                                    var34.setSourceName("Entitlements Add Operation for: " + var1);
+                                    var34.add(var37);
+                                    Logger var10000 = logger;
+                                    String var10001 = System.lineSeparator();
+                                    var10000.debug("plan: " + var10001 + var34.toXml());
+                                    boolean var17 = executePlan(var34);
+                                    logger.debug("Plan was executed.");
+                                    if (!var17) {
+                                        logger.debug("fail");
+                                        HashMap var41 = new HashMap();
+                                        var41.put("message", "İşlem başarısız");
+                                        var41.put("status", "failed");
+                                        HashMap var42 = new HashMap();
+                                        var42.put("action", "Add Entitlements - Consultant");
+                                        var42.put("source", "Manage Engine - Failed");
+                                        var42.put("application", "Active Directory");
+                                        var42.put("user", var1);
+                                        var0.put("message", "Beklenilmeyen bir hata sonucu işlem uç sistemde yapılamamıştır.");
+                                        var42.put("params", var0);
+                                        logger.debug("fail response");
+                                        createAudit(var42);
+                                        return Response.status(Status.CONFLICT).entity(var41).build();
+                                    } else {
+                                        logger.debug("success");
+                                        HashMap var18 = new HashMap();
+                                        var18.put("message", "İşlem başarılı bir şekilde gerçekleştirilmiştir.");
+                                        var18.put("status", "success");
+                                        HashMap var19 = new HashMap();
+                                        var19.put("action", "Add Entitlements - Consultant");
+                                        var19.put("source", "Manage Engine - Success");
+                                        var19.put("application", "Active Directory");
+                                        var19.put("user", var1);
+                                        var0.put("message", "İşlem Başarılı bir şekilde gerçekleştirilmiştir.");
+                                        var19.put("params", var0);
+                                        createAudit(var19);
+                                        logger.debug("success response ");
+                                        return Response.status(Status.OK).entity(var18).build();
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    public static Response removeEntitlements(Map<String, Object> var0) throws GeneralException {
+        context = SailPointFactory.getCurrentContext();
+        String var1 = (String)var0.get("userNumber");
+        logger.debug("userNumber: " + var1);
+        if (StringUtils.isEmpty(var1)) {
+            logger.debug("userNumber boş girilmiştir.");
+            HashMap var20 = new HashMap();
+            var20.put("action", "Remove Entitlements - Consultant");
+            var20.put("source", "Manage Engine - Failed");
+            var20.put("application", "Active Directory");
+            var20.put("user", var1);
+            var0.put("message", "Danışman sicili boş girildiği için işlem yapılmamıştır.");
+            var20.put("params", var0);
+            createAudit(var20);
+            HashMap var22 = new HashMap();
+            var22.put("status", "failed");
+            var22.put("message", "userNumber alanı boş girilemez!");
+            logger.debug("errorMap: " + var22);
+            return Response.status(Status.BAD_REQUEST).entity(var22).build();
+        } else {
+            String var2 = (String)var0.get("entitlements");
+            if (StringUtils.isEmpty(var2)) {
+                logger.debug("entitlement boş girilmiştir.");
+                HashMap var21 = new HashMap();
+                var21.put("action", "Remove Entitlements - Consultant");
+                var21.put("source", "Manage Engine - Failed");
+                var21.put("application", "Active Directory");
+                var21.put("user", var1);
+                var0.put("message", "entitlementStr boş girildiği için işlem yapılmamıştır.");
+                var21.put("params", var0);
+                createAudit(var21);
+                HashMap var24 = new HashMap();
+                var24.put("status", "failed");
+                var24.put("message", "entitlements alanı boş girilemez!");
+                logger.debug("errorMap: " + var24);
+                return Response.status(Status.BAD_REQUEST).entity(var24).build();
+            } else {
+                logger.debug("entitlementStr: " + var2);
+                String var3 = (String)var0.get("application");
+                if (StringUtils.isEmpty(var3)) {
+                    logger.debug("applicationName boş girilmiştir.");
+                    HashMap var23 = new HashMap();
+                    var23.put("action", "Remove Entitlements - Consultant");
+                    var23.put("source", "Manage Engine - Failed");
+                    var23.put("application", "Active Directory");
+                    var23.put("user", var1);
+                    var0.put("message", "ApplicationName boş girildiği için işlem yapılmamıştır.");
+                    var23.put("params", var0);
+                    createAudit(var23);
+                    HashMap var25 = new HashMap();
+                    var25.put("status", "failed");
+                    var25.put("message", "applicationName alanı boş girilemez!");
+                    logger.debug("errorMap: " + var25);
+                    return Response.status(Status.BAD_REQUEST).entity(var25).build();
+                } else {
+                    logger.debug("applicationName: " + var3);
+                    List var4 = Arrays.asList(var2.split(";"));
+                    logger.debug("entitlements: " + var4);
+                    String var5 = (String)var0.get("ticketId");
+                    if (StringUtils.isEmpty(var5)) {
+                        logger.debug("ticketId boş girilmiştir.");
+                        HashMap var26 = new HashMap();
+                        var26.put("action", "Remove Entitlements - Consultant");
+                        var26.put("source", "Manage Engine - Failed");
+                        var26.put("application", "Active Directory");
+                        var26.put("user", var1);
+                        var0.put("message", "ticketId boş girildiği için işlem yapılmamıştır.");
+                        var26.put("params", var0);
+                        createAudit(var26);
+                        HashMap var28 = new HashMap();
+                        var28.put("status", "failed");
+                        var28.put("message", "ticketId alanı boş girilemez!");
+                        logger.debug("errorMap: " + var28);
+                        return Response.status(Status.BAD_REQUEST).entity(var28).build();
+                    } else {
+                        logger.debug("ticketID: " + var5);
+                        Identity var6 = (Identity)context.getObjectByName(Identity.class, var1);
+                        logger.debug("consultant: " + var6);
+                        if (null == var6) {
+                            logger.debug("consultant boş");
+                            HashMap var27 = new HashMap();
+                            var27.put("action", "Remove Entitlement - Consultant");
+                            var27.put("source", "Manage Engine - Failed");
+                            var27.put("application", "Active Directory");
+                            var27.put("user", var1);
+                            var0.put("message", var1 + " siciline sahip danışman bulunamamıştır.");
+                            var27.put("params", var0);
+                            createAudit(var27);
+                            HashMap var29 = new HashMap();
+                            var29.put("status", "failed");
+                            var29.put("message", var1 + " siciline sahip danışman bulunamamıştır.");
+                            logger.debug("errorMap: " + var29);
+                            return Response.status(Status.NOT_FOUND).entity(var29).build();
+                        } else {
+                            IdentityService var7 = new IdentityService(context);
+                            Application var8;
+                            if (StringUtils.equalsIgnoreCase(var3, "consultant")) {
+                                var8 = (Application)context.getObjectByName(Application.class, "Active Directory");
+                            } else {
+                                if (!StringUtils.equalsIgnoreCase(var3, "cyberark")) {
+                                    logger.debug("appName consultant ya da cyberark olarak girilmemiş");
+                                    HashMap var30 = new HashMap();
+                                    var30.put("action", "Remove Entitlement - Consultant");
+                                    var30.put("source", "Manage Engine - Failed");
+                                    var30.put("application", var3);
+                                    var30.put("user", var1);
+                                    var0.put("message", var3 + " isimli uygulama bulunmamaktadır.");
+                                    var30.put("params", var0);
+                                    createAudit(var30);
+                                    HashMap var32 = new HashMap();
+                                    var32.put("status", "failed");
+                                    var32.put("message", var3 + " isimli uygulama bulunmamaktadır.");
+                                    logger.debug("errorMap: " + var32);
+                                    return Response.status(Status.NOT_FOUND).entity(var32).build();
+                                }
+
+                                var8 = (Application)context.getObjectByName(Application.class, "Active Directory - Cyberark Accounts");
+                            }
+
+                            List var9 = var7.getLinks(var6, var8);
+                            if (null == var9) {
+                                logger.debug("adLinks boş");
+                                HashMap var31 = new HashMap();
+                                var31.put("action", "Remove Entitlement - Consultant");
+                                var31.put("source", "Manage Engine - Failed");
+                                var31.put("application", "Active Directory");
+                                var31.put("user", var1);
+                                var0.put("message", var1 + " siciline sahip active directory hesabı bulunamamıştır.");
+                                var31.put("params", var0);
+                                createAudit(var31);
+                                HashMap var33 = new HashMap();
+                                var33.put("status", "failed");
+                                var33.put("message", "girilen " + var1 + " siciline sahip active directory hesabı bulunamamıştır.");
+                                logger.debug("errorMap: " + var33);
+                                return Response.status(Status.NOT_FOUND).entity(var33).build();
+                            } else {
+                                Link var10 = (Link)var9.get(0);
+                                String var11 = var10.getNativeIdentity();
+                                ArrayList var12 = new ArrayList();
+                                ArrayList var13 = new ArrayList();
+
+                                for(String var15 : var4) {
+                                    ManagedAttribute var16 = (ManagedAttribute)context.getUniqueObject(ManagedAttribute.class, Filter.like("value", "CN=" + var15, MatchMode.START));
+                                    if (null != var16) {
+                                        logger.debug("ma Value: " + var16.getValue());
+                                        if (checkMemberOf(var16.getValue(), var11)) {
+                                            var12.add(var16.getValue());
+                                        }
+                                    } else {
+                                        var13.add(var15);
+                                    }
+                                }
+
+                                logger.debug("ma values were checked.");
+                                if (CollectionUtils.isNotEmpty(var13)) {
+                                    HashMap var36 = new HashMap();
+                                    var36.put("action", "Remove Entitlement - Consultant");
+                                    var36.put("source", "Manage Engine - Failed");
+                                    var36.put("application", "Active Directory");
+                                    var36.put("user", var1);
+                                    var0.put("message", "Girilen değerlere ait yetikler bulunamamıştır.");
+                                    var36.put("params", var0);
+                                    createAudit(var36);
+                                    HashMap var39 = new HashMap();
+                                    var39.put("message", "Girilen değerlere ait yetikler bulunamamıştır.");
+                                    var39.put("entitlements", var13);
+                                    var39.put("status", "failed");
+                                    return Response.status(Status.NOT_FOUND).entity(var39).build();
+                                } else if (CollectionUtils.isEmpty(var12)) {
+                                    HashMap var35 = new HashMap();
+                                    var35.put("action", "Remove Entitlement - Consultant");
+                                    var35.put("source", "Manage Engine - Failed");
+                                    var35.put("application", "Active Directory");
+                                    var35.put("user", var1);
+                                    var0.put("message", "Girilen değerlere ait yetikler danışmanda mevcuttur.");
+                                    var35.put("params", var0);
+                                    createAudit(var35);
+                                    HashMap var38 = new HashMap();
+                                    var38.put("message", "Girilen değerlere ait yetikler danışmanda mevcuttur.");
+                                    var38.put("entitlements", var13);
+                                    var38.put("status", "failed");
+                                    return Response.status(Status.CONFLICT).entity(var38).build();
+                                } else {
+                                    logger.debug("maValues: " + var12);
+                                    ProvisioningPlan var34 = new ProvisioningPlan();
+                                    ProvisioningPlan.AccountRequest var37 = new ProvisioningPlan.AccountRequest();
+                                    ProvisioningPlan.AttributeRequest var40 = new ProvisioningPlan.AttributeRequest();
+                                    var37.setNativeIdentity(var11);
+                                    var37.setApplication(var8.getName());
+                                    var37.setOperation(Operation.Modify);
+                                    var40.setOperation(sailpoint.object.ProvisioningPlan.Operation.Remove);
+                                    var40.setName("memberOf");
+                                    var40.setValue(var12);
+                                    var37.add(var40);
+                                    var34.setIdentity(var6);
+                                    var34.setSource(Source.WebService);
+                                    var34.setSourceName("Entitlements Add Operation for: " + var1);
+                                    var34.add(var37);
+                                    Logger var10000 = logger;
+                                    String var10001 = System.lineSeparator();
+                                    var10000.debug("plan: " + var10001 + var34.toXml());
+                                    boolean var17 = executePlan(var34);
+                                    logger.debug("Plan was executed.");
+                                    if (!var17) {
+                                        logger.debug("fail");
+                                        HashMap var41 = new HashMap();
+                                        var41.put("message", "İşlem başarısız");
+                                        var41.put("status", "failed");
+                                        HashMap var42 = new HashMap();
+                                        var42.put("action", "Remove Entitlements - Consultant");
+                                        var42.put("source", "Manage Engine - Failed");
+                                        var42.put("application", "Active Directory");
+                                        var42.put("user", var1);
+                                        var0.put("message", "Beklenilmeyen bir hata sonucu işlem uç sistemde yapılamamıştır.");
+                                        var42.put("params", var0);
+                                        logger.debug("fail response");
+                                        createAudit(var42);
+                                        return Response.status(Status.CONFLICT).entity(var41).build();
+                                    } else {
+                                        logger.debug("success");
+                                        HashMap var18 = new HashMap();
+                                        var18.put("message", "İşlem başarılı bir şekilde gerçekleştirilmiştir.");
+                                        var18.put("status", "success");
+                                        HashMap var19 = new HashMap();
+                                        var19.put("action", "Remove Entitlements - Consultant");
+                                        var19.put("source", "Manage Engine - Success");
+                                        var19.put("application", "Active Directory");
+                                        var19.put("user", var1);
+                                        var0.put("message", "İşlem Başarılı bir şekilde gerçekleştirilmiştir.");
+                                        var19.put("params", var0);
+                                        createAudit(var19);
+                                        logger.debug("success response ");
+                                        return Response.status(Status.OK).entity(var18).build();
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    public static Response getAccounts() throws GeneralException {
+        context = SailPointFactory.getCurrentContext();
+        QueryOptions var0 = new QueryOptions();
+        var0.add(new Filter[]{Filter.eq("links.application.name", "Active Directory")});
+        var0.add(new Filter[]{Filter.like("name", "G0", MatchMode.START)});
+        List var1 = context.getObjects(Identity.class, var0);
+        if (null == var1) {
+            HashMap var5 = new HashMap();
+            var5.put("status", "failed");
+            var5.put("message", "filtre yanlış ya da danışmanlar yok.");
+            logger.debug("errorMap: " + var5);
+            return Response.status(Status.NOT_FOUND).entity(var5).build();
+        } else {
+            ArrayList var2 = new ArrayList();
+
+            for(Identity var4 : var1) {
+                var2.add(var4.getName());
+            }
+
+            if (CollectionUtils.isEmpty(var2)) {
+                HashMap var6 = new HashMap();
+                var6.put("status", "failed");
+                var6.put("message", "filtre yanlış ya da danışmanlar yok.");
+                logger.debug("errorMap: " + var6);
+                return Response.status(Status.NOT_FOUND).entity(var6).build();
+            } else {
+                return Response.status(Status.OK).entity(var2).build();
+            }
+        }
+    }
+
+    public static Response getEntitlements() throws GeneralException {
+        context = SailPointFactory.getCurrentContext();
+        QueryOptions var0 = new QueryOptions();
+        var0.add(new Filter[]{Filter.eq("application.name", "Active Directory")});
+        List var1 = context.getObjects(ManagedAttribute.class, var0);
+        ArrayList var2 = new ArrayList();
+        if (CollectionUtils.isNotEmpty(var1)) {
+            for(ManagedAttribute var4 : var1) {
+                if (StringUtils.isNotEmpty(var4.getDisplayName())) {
+                    var2.add(var4.getDisplayName());
+                } else if (null != var4.getAttribute("cn")) {
+                    var2.add((String)var4.getAttribute("cn"));
+                }
+            }
+        }
+
+        return Response.status(Status.OK).entity(var2).build();
+    }
+}
